@@ -1,0 +1,28 @@
+server:
+  port: 8080
+
+spring:
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 500MB
+  datasource:
+    url: jdbc:sqlite:${user.home}/easy-control/easy-skill.db
+    driver-class-name: org.sqlite.JDBC
+  jpa:
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+
+app:
+  upload-dir: ${user.home}/easy-control/uploads
+  skills-dir: ${user.home}/easy-control/skills
+  ffmpeg-path: ffmpeg
+  ai-api-key: sk-1afb2594035c4fd2871afbef92134055
+  ai-base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  ai-model: qwen3-vl-plus
+
+logging:
+  level:
+    com.easycontrol: DEBUG

@@ -15,7 +15,7 @@
 ### 1. 安装依赖
 
 ```bash
-cd ~/.claude/record-monitor
+cd skills/record-skill/scripts
 pip3 install -r requirements.txt
 ```
 
@@ -74,27 +74,27 @@ pip3 install -r requirements.txt
 
 ```
 easy-skill/
-├── .claude/skills/record-skill/
-│   ├── SKILL.md          # Skill 定义
-│   └── README.md         # 本文件
-└── records/              # 数据存储目录
-    ├── 2025-02-20.json
-    └── ...
-
-~/.claude/record-monitor/   # 监控程序
-├── monitor.py
-├── lib/
-│   ├── window_watcher.py
-│   ├── event_logger.py
-│   ├── storage.py
-│   └── summarizer.py
-└── storage/
-    └── current.lock
+├── skills/
+│   └── record-skill/
+│       ├── SKILL.md          # Skill 定义
+│       ├── README.md         # 本文件
+│       ├── config.py         # 配置文件
+│       └── scripts/          # 监控程序
+│           ├── monitor.py
+│           ├── requirements.txt
+│           └── lib/
+│               ├── window_watcher.py
+│               ├── event_logger.py
+│               ├── storage.py
+│               └── summarizer.py
+├── records/                  # 数据存储目录
+│   ├── 2025-02-20.json
+│   └── ...
 ```
 
 ## 配置
 
-编辑 `~/.claude/record-monitor/config.py`：
+编辑 `skills/record-skill/config.py`：
 
 ```python
 # 排除的应用（不记录）
@@ -112,16 +112,16 @@ POLL_INTERVAL = 0.5
 ### 无法启动监控
 ```bash
 # 检查锁文件
-ls -la ~/.claude/record-monitor/storage/current.lock
+ls -la skills/record-skill/storage/current.lock
 
 # 手动删除锁文件
-rm ~/.claude/record-monitor/storage/current.lock
+rm skills/record-skill/storage/current.lock
 ```
 
 ### 测试监控程序
 ```bash
 # 前台启动（查看调试信息）
-python3 ~/.claude/record-monitor/monitor.py start
+python3 skills/record-skill/scripts/monitor.py start
 
 # 在另一个终端查看记录
 tail -f records/$(date +%Y-%m-%d).json

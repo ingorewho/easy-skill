@@ -1,0 +1,14 @@
+/Users/rainman/workspace/github_repo/easy-control/backend/src/main/java/com/easycontrol/repository/SkillRepository.java
+/Users/rainman/workspace/github_repo/easy-control/backend/src/main/java/com/easycontrol/model/FrameInfo.java
+/Users/rainman/workspace/github_repo/easy-control/backend/src/main/java/com/easycontrol/model/SkillRecord.java
+/Users/rainman/workspace/github_repo/easy-control/backend/src/main/java/com/easycontrol/service/AIService.java
+/Users/rainman/workspace/github_repo/easy-control/backend/src/main/java/com/easycontrol/model/VideoUploadResponse.java
+/Users/rainman/workspace/github_repo/easy-control/backend/src/main/java/com/easycontrol/model/FrameExtractRequest.java
+/Users/rainman/workspace/github_repo/easy-control/backend/src/main/java/com/easycontrol/service/SkillService.java
+/Users/rainman/workspace/github_repo/easy-control/backend/src/main/java/com/easycontrol/model/GenerateSkillRequest.java
+/Users/rainman/workspace/github_repo/easy-control/backend/src/main/java/com/easycontrol/config/CorsConfig.java
+/Users/rainman/workspace/github_repo/easy-control/backend/src/main/java/com/easycontrol/controller/VideoController.java
+/Users/rainman/workspace/github_repo/easy-control/backend/src/main/java/com/easycontrol/model/SkillFile.java
+/Users/rainman/workspace/github_repo/easy-control/backend/src/main/java/com/easycontrol/service/VideoService.java
+/Users/rainman/workspace/github_repo/easy-control/backend/src/main/java/com/easycontrol/controller/SkillController.java
+/Users/rainman/workspace/github_repo/easy-control/backend/src/main/java/com/easycontrol/EasyControlApplication.java

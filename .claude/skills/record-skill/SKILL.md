@@ -1,10 +1,21 @@
 ---
 name: record-skill
 description: System activity recording and daily summary skill. Controls a background monitor to track window switches, app usage, and generate daily activity summaries with productivity insights.
-tags: [productivity, monitoring, summary, time-tracking]
-category: productivity
-argument-hint: "[command] [args]"
-allowed-tools: Read, Write, Bash, Grep, Glob
+metadata:
+  openclaw:
+    emoji: "📊"
+    requires:
+      env:
+        - RECORD_SKILL_HOME
+        - RECORD_STORAGE_DIR
+      bins:
+        - python3
+    install:
+      - id: pip-deps
+        kind: pip
+        package: "pyobjc-framework-Quartz pyobjc-framework-ApplicationServices pyyaml"
+        label: "Install Python dependencies"
+user-invocable: true
 ---
 
 # Record Skill - 系统活动记录与总结
@@ -72,7 +83,7 @@ $ /record_config
 
 ### 监控程序
 - 独立的 Python 进程，使用 AppleScript 和 Quartz API 监听窗口变化
-- 监控程序位置：`~/.claude/record-monitor/monitor.py`
+- 监控程序位置：`.claude/skills/record-skill/scripts/monitor.py`
 - 以轮询方式（0.5秒间隔）检测活动窗口
 
 ### 数据存储
@@ -170,7 +181,7 @@ $ /record_config
 
 ### 监控无法启动
 1. 检查是否已授予辅助功能权限
-2. 查看 lock 文件：`cat ~/.claude/record-monitor/storage/current.lock`
+2. 查看 lock 文件：`cat .claude/skills/record-skill/storage/current.lock`
 3. 手动删除锁文件后重试
 
 ### 没有记录数据
@@ -187,7 +198,7 @@ $ /record_config
 
 ### /record_start
 1. 检查监控程序是否已在运行（检查 lock 文件）
-2. 如未运行，启动监控程序：`python3 ~/.claude/record-monitor/monitor.py start`
+2. 如未运行，启动监控程序：`python3 .claude/skills/record-skill/scripts/monitor.py start`
 3. 返回启动状态
 
 ### /record_stop
