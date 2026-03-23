@@ -51,3 +51,53 @@ export const deleteSkill = (skillId) =>
 
 export const deploySkill = (skillId) =>
   client.post(`/skills/${skillId}/deploy`)
+
+export const fetchAndroidDevices = () =>
+  client.get('/devices/android')
+
+export const fetchIosDevices = () =>
+  client.get('/devices/ios')
+
+export const fetchAllDevices = () =>
+  client.get('/devices')
+
+// ==================== 归档 API ====================
+
+// 视频归档
+export const saveVideoArchive = (videoId, description) =>
+  client.post('/archives/videos', { videoId, description })
+
+export const fetchVideoArchives = () =>
+  client.get('/archives/videos')
+
+export const deleteVideoArchive = (id) =>
+  client.delete(`/archives/videos/${id}`)
+
+// 帧归档
+export const saveFrameArchive = (data) =>
+  client.post('/archives/frames', data)
+
+export const fetchFrameArchives = () =>
+  client.get('/archives/frames')
+
+export const fetchFramesByVideo = (videoArchiveId) =>
+  client.get(`/archives/frames/video/${videoArchiveId}`)
+
+export const deleteFrameArchive = (id) =>
+  client.delete(`/archives/frames/${id}`)
+
+// 诉求历史
+export const saveRequirement = (content, frameIds, platform) =>
+  client.post('/archives/requirements', { content, frameIds, platform })
+
+export const fetchRequirementHistory = () =>
+  client.get('/archives/requirements')
+
+export const fetchRecentRequirements = () =>
+  client.get('/archives/requirements/recent')
+
+export const updateRequirementUseCount = (id) =>
+  client.put(`/archives/requirements/${id}/use`)
+
+export const deleteRequirement = (id) =>
+  client.delete(`/archives/requirements/${id}`)

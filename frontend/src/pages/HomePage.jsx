@@ -1,18 +1,29 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { uploadVideo } from '../api/client.js'
+import { uploadVideo, fetchSkillList } from '../api/client.js'
 import useAppStore from '../store/useAppStore.js'
 
 export default function HomePage() {
   const navigate = useNavigate()
   const setVideo = useAppStore(s => s.setVideo)
+  const setActiveTab = useAppStore(s => s.setActiveTab)
   const reset = useAppStore(s => s.reset)
 
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState(null)
+  const [skillCount, setSkillCount] = useState(0)
   const inputRef = useRef()
+
+  // 加载历史 Skill 数量
+  useEffect(() => {
+    fetchSkillList().then(list => {
+      setSkillCount(list?.length || 0)
+    }).catch(() => {
+      setSkillCount(0)
+    })
+  }, [])
 
   const handleFile = async (file) => {
     if (!file || !file.type.startsWith('video/')) {
@@ -91,6 +102,27 @@ export default function HomePage() {
           {error}
         </div>
       )}
+
+      {/* Action buttons */}
+      <div className='mt-12 flex gap-4'>
+        <button
+          onClick={() => {
+            reset()
+            setActiveTab('skill')
+            navigate('/playground/history')
+          }}
+          disabled={skillCount === 0}
+          className='flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl transition-colors'
+        >
+          <span>📚</span>
+          <span>Skill 仓库</span>
+          {skillCount > 0 && (
+            <span className='ml-1 px-2 py-0.5 bg-blue-600 text-xs rounded-full'>
+              {skillCount}
+            </span>
+          )}
+        </button>
+      </div>
 
       {/* Feature list */}
       <div className='mt-16 grid grid-cols-3 gap-6 max-w-2xl w-full'>

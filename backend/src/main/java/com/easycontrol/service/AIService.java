@@ -27,9 +27,9 @@ public class AIService {
   private String model;
 
   private final OkHttpClient httpClient = new OkHttpClient.Builder()
-      .connectTimeout(30, TimeUnit.SECONDS)
-      .readTimeout(120, TimeUnit.SECONDS)
-      .writeTimeout(60, TimeUnit.SECONDS)
+      .connectTimeout(60, TimeUnit.SECONDS)
+      .readTimeout(600, TimeUnit.SECONDS)
+      .writeTimeout(120, TimeUnit.SECONDS)
       .build();
 
   private final ObjectMapper objectMapper = new ObjectMapper();
@@ -218,9 +218,9 @@ public class AIService {
             "start": "node scripts/main.js"
           },
           "dependencies": {
-            "@midscene/web": "^latest",
-            "puppeteer": "^latest",
-            "dotenv": "^latest"
+            "@midscene/web": "^1.5.6",
+            "puppeteer": "^24.0.0",
+            "dotenv": "^17.0.0"
           }
         }
 
@@ -257,8 +257,8 @@ public class AIService {
             "start": "node scripts/main.js"
           },
           "dependencies": {
-            "@midscene/android": "^latest",
-            "dotenv": "^latest"
+            "@midscene/android": "^1.5.6",
+            "dotenv": "^17.0.0"
           }
         }
 
@@ -293,8 +293,8 @@ public class AIService {
             "start": "node scripts/main.js"
           },
           "dependencies": {
-            "@midscene/ios": "^latest",
-            "dotenv": "^latest"
+            "@midscene/ios": "^1.5.6",
+            "dotenv": "^17.0.0"
           }
         }
 
@@ -326,8 +326,8 @@ public class AIService {
             "start": "node scripts/main.js"
           },
           "dependencies": {
-            "@midscene/computer": "^latest",
-            "dotenv": "^latest"
+            "@midscene/computer": "^1.5.6",
+            "dotenv": "^17.0.0"
           }
         }
 

@@ -179,7 +179,7 @@ public class SkillService {
       default -> "@midscene/web";
     };
     
-    String additionalDeps = platform.equals("browser") ? ",\n    \"puppeteer\": \"^latest\"" : "";
+    String additionalDeps = platform.equals("browser") ? ",\n    \"puppeteer\": \"^24.0.0\"" : "";
     
     return """
         {
@@ -191,8 +191,8 @@ public class SkillService {
             "start": "node scripts/main.js"
           },
           "dependencies": {
-            "%s": "^latest",
-            "dotenv": "^latest"%s
+            "%s": "^1.5.6",
+            "dotenv": "^17.0.0"%s
           }
         }
         """.formatted(skillName, midscenePkg, additionalDeps);
