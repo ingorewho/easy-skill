@@ -1,6 +1,7 @@
 package com.easycontrol.service;
 
 import com.easycontrol.model.SkillFile;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -22,7 +23,9 @@ import java.util.regex.Pattern;
 public class SkillRunnerService {
 
     private final SkillService skillService;
+    private final KnowledgeService knowledgeService;
     private final ExecutorService executor = Executors.newCachedThreadPool();
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${app.runner.timeout:180}")
     private int timeoutSeconds;
@@ -40,6 +43,7 @@ public class SkillRunnerService {
         private List<Screenshot> screenshots;
         private String error;
         private long durationMs;
+        private String data; // 存储脚本返回的完整JSON结果
 
         @Data
         @Builder
@@ -58,6 +62,8 @@ public class SkillRunnerService {
         private String deviceId;      // 设备ID（android/ios）
         private boolean headless;     // 无头模式
         private int maxSteps;         // 最大步骤数
+        private Map<String, String> variables; // 变量值映射
+        private Integer timeoutSeconds; // 本次任务超时（秒），null 走全局默认
     }
 
     @Data
@@ -97,24 +103,58 @@ public class SkillRunnerService {
             writeSkillFiles(skillFile, tempDir, scriptsDir);
             logConsumer.accept("📝 写入 " + skillFile.getFiles().size() + " 个文件");
 
-            // 4. 安装依赖
-            logConsumer.accept("⬇️ 安装依赖中... (npm install)");
-            int npmExit = runShellCommand(tempDir, "npm install", line -> {
-                // npm 输出过滤，只显示重要信息
-                String lower = line.toLowerCase();
-                if (line.contains("added") || line.contains("removed") || line.contains("changed") ||
-                    lower.contains("err") || lower.contains("error") || lower.contains("warn") ||
-                    lower.contains("npm")) {
-                    logConsumer.accept("[npm] " + line);
+            // 3.1 拷贝知识库（如有）
+            try {
+                knowledgeService.copyKnowledgeTo(skillId, tempDir);
+                Path kbDir = tempDir.resolve("knowledge");
+                if (Files.exists(kbDir)) {
+                    long kbCount = Files.list(kbDir).filter(p -> !p.getFileName().toString().equals("knowledge.json")).count();
+                    if (kbCount > 0) {
+                        logConsumer.accept("📚 加载知识库：" + kbCount + " 个文件");
+                    }
                 }
-            }, 120);
+            } catch (Exception e) {
+                log.warn("Failed to copy knowledge base: {}", e.getMessage());
+            }
+
+            // 4. 检查并使用本地 midscene 缓存
+            Path localMidsceneCache = findLocalMidsceneCache();
+            if (localMidsceneCache != null) {
+                logConsumer.accept("📦 发现本地 midscene 缓存: " + localMidsceneCache);
+                try {
+                    linkLocalMidscene(tempDir, localMidsceneCache, logConsumer);
+                    logConsumer.accept("✅ 已链接本地 midscene");
+                } catch (Exception e) {
+                    log.warn("Failed to link local midscene, will use npm install", e);
+                    logConsumer.accept("⚠️ 本地链接失败，将使用 npm 安装");
+                }
+            }
+            
+            // 5. 安装依赖（如果本地链接成功，这会很快）
+            logConsumer.accept("⬇️ 安装依赖中... (npm install)");
+            // 设置 PUPPETEER_SKIP_DOWNLOAD 跳过浏览器下载，使用系统已安装的 Chrome
+            // 使用 --legacy-peer-deps 避免一些兼容性问题
+            // 使用 --prefer-offline 优先使用本地缓存
+            int npmExit = runShellCommand(tempDir, 
+                "PUPPETEER_SKIP_DOWNLOAD=true npm install --legacy-peer-deps --prefer-offline --progress=false", 
+                line -> {
+                    // npm 输出过滤，显示进度和关键信息
+                    String lower = line.toLowerCase();
+                    if (line.contains("added") || line.contains("removed") || line.contains("changed") ||
+                        line.contains("packages") || line.contains("up to date") ||
+                        lower.contains("err") || lower.contains("error") || lower.contains("warn") ||
+                        (lower.contains("npm") && !line.contains("http"))) {
+                        logConsumer.accept("[npm] " + line);
+                    }
+                }, 
+                300);  // 增加到 5 分钟超时
             if (npmExit != 0) {
-                return buildErrorResult(startTime, npmExit, "npm install 失败");
+                return buildErrorResult(startTime, npmExit, "npm install 失败，请检查网络连接或手动安装依赖");
             }
             logConsumer.accept("✅ 依赖安装完成");
 
             // 5. 修改脚本注入日志和截图
-            injectInstrumentation(scriptsDir.resolve("main.js"), options.getPlatform());
+            injectInstrumentation(scriptsDir.resolve("main.js"), options.getPlatform(), options.getVariables());
 
             // 6. 执行脚本
             logConsumer.accept("🚀 开始执行脚本...");
@@ -221,6 +261,132 @@ public class SkillRunnerService {
     }
 
     // ==================== 私有方法 ====================
+
+    /**
+     * 查找本地 midscene 缓存目录
+     * 按优先级查找以下位置：
+     * 1. ~/.easy-control/node_modules （全局缓存）
+     * 2. ~/.openclaw/skills/{skill}/node_modules
+     * 3. 当前工作目录下的 node_modules
+     */
+    private Path findLocalMidsceneCache() {
+        String homeDir = System.getProperty("user.home");
+        
+        // 1. 检查全局缓存目录
+        Path globalCache = Paths.get(homeDir, ".easy-control", "node_modules");
+        if (hasMidscenePackage(globalCache)) {
+            return globalCache;
+        }
+        
+        // 2. 检查 ~/.openclaw/skills 下的技能目录
+        Path openclawSkills = Paths.get(homeDir, ".openclaw", "skills");
+        if (Files.exists(openclawSkills)) {
+            try {
+                return Files.list(openclawSkills)
+                    .filter(Files::isDirectory)
+                    .map(skillDir -> skillDir.resolve("node_modules"))
+                    .filter(this::hasMidscenePackage)
+                    .findFirst()
+                    .orElse(null);
+            } catch (IOException e) {
+                log.warn("Failed to scan openclaw skills directory", e);
+            }
+        }
+        
+        // 3. 检查当前工作目录
+        Path cwdNodeModules = Paths.get("node_modules").toAbsolutePath();
+        if (hasMidscenePackage(cwdNodeModules)) {
+            return cwdNodeModules;
+        }
+        
+        return null;
+    }
+    
+    /**
+     * 检查目录是否包含 midscene 包
+     */
+    private boolean hasMidscenePackage(Path nodeModules) {
+        if (!Files.exists(nodeModules)) {
+            return false;
+        }
+        // 检查是否有 @midscene 目录
+        Path midsceneDir = nodeModules.resolve("@midscene");
+        return Files.exists(midsceneDir) && Files.isDirectory(midsceneDir);
+    }
+    
+    /**
+     * 链接本地 midscene 到临时目录
+     * 通过创建符号链接或复制文件来复用本地缓存
+     */
+    private void linkLocalMidscene(Path tempDir, Path sourceNodeModules, Consumer<String> logConsumer) throws IOException {
+        Path targetNodeModules = tempDir.resolve("node_modules");
+        Files.createDirectories(targetNodeModules);
+        
+        Path sourceMidscene = sourceNodeModules.resolve("@midscene");
+        Path targetMidscene = targetNodeModules.resolve("@midscene");
+        
+        // 检查源目录中的 midscene 包
+        if (!Files.exists(sourceMidscene)) {
+            throw new IOException("Source @midscene not found: " + sourceMidscene);
+        }
+        
+        // 列出所有 @midscene/* 包
+        List<String> linkedPackages = new ArrayList<>();
+        try (var stream = Files.list(sourceMidscene)) {
+            List<Path> packages = stream.filter(Files::isDirectory).toList();
+            
+            for (Path pkg : packages) {
+                String pkgName = pkg.getFileName().toString();
+                Path targetPkg = targetMidscene.resolve(pkgName);
+                
+                try {
+                    // 尝试创建符号链接
+                    Files.createSymbolicLink(targetPkg, pkg);
+                    linkedPackages.add("@midscene/" + pkgName);
+                } catch (UnsupportedOperationException | IOException e) {
+                    // 如果不支持符号链接，则复制
+                    logConsumer.accept("  📋 复制 @midscene/" + pkgName + "...");
+                    copyDirectory(pkg, targetPkg);
+                    linkedPackages.add("@midscene/" + pkgName + " (copied)");
+                }
+            }
+        }
+        
+        // 同时链接/复制一些常用依赖
+        String[] commonDeps = {"zod", "openai", "dotenv", "puppeteer-core"};
+        for (String dep : commonDeps) {
+            Path sourceDep = sourceNodeModules.resolve(dep);
+            Path targetDep = targetNodeModules.resolve(dep);
+            if (Files.exists(sourceDep) && !Files.exists(targetDep)) {
+                try {
+                    Files.createSymbolicLink(targetDep, sourceDep);
+                } catch (Exception e) {
+                    // 忽略失败，让 npm install 处理
+                }
+            }
+        }
+        
+        logConsumer.accept("  📦 已链接/复制: " + String.join(", ", linkedPackages));
+    }
+    
+    /**
+     * 递归复制目录
+     */
+    private void copyDirectory(Path source, Path target) throws IOException {
+        Files.walk(source).forEach(srcPath -> {
+            try {
+                Path relativePath = source.relativize(srcPath);
+                Path targetPath = target.resolve(relativePath);
+                if (Files.isDirectory(srcPath)) {
+                    Files.createDirectories(targetPath);
+                } else {
+                    Files.copy(srcPath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+                }
+            } catch (IOException e) {
+                log.warn("Failed to copy: {}", srcPath, e);
+            }
+        });
+    }
 
     private Path createTempDir(String runId) throws IOException {
         Path tempDir = Paths.get(System.getProperty("java.io.tmpdir"), "skill-run-" + runId);
@@ -370,20 +536,23 @@ public class SkillRunnerService {
         return output;
     }
 
-    private void injectInstrumentation(Path mainJsPath, String platform) throws IOException {
+    private void injectInstrumentation(Path mainJsPath, String platform, Map<String, String> variables) throws IOException {
         if (!Files.exists(mainJsPath)) {
             return;
         }
         
         String content = Files.readString(mainJsPath);
         
+        // 移除 if (require.main === module) 代码块，避免与运行器冲突
+        content = removeMainBlock(content);
+        
         // 注入监控代码到开头
         String injection = buildInstrumentationCode(platform);
         content = injection + content;
         
         // 在文件末尾添加执行代码（如果还没有的话）
-        if (!content.contains("main(process.env.DEVICE_ID")) {
-            String executor = buildExecutorCode(platform);
+        if (!content.contains("// === Auto-execution ===")) {
+            String executor = buildExecutorCode(platform, variables);
             content = content + "\n" + executor;
         }
         
@@ -391,9 +560,57 @@ public class SkillRunnerService {
     }
     
     /**
-     * 构建执行代码，调用 main 函数
+     * 移除脚本中的 if (require.main === module) 代码块
+     * 避免与 SkillRunner 的自动执行代码冲突
      */
-    private String buildExecutorCode(String platform) {
+    private String removeMainBlock(String content) {
+        // 匹配 if (require.main === module) { ... } 块
+        // 使用简单的括号计数来处理嵌套
+        String pattern = "if\\s*\\(\\s*require\\.main\s*===\s*module\s*\\)\\s*\\{";
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile(pattern);
+        java.util.regex.Matcher m = p.matcher(content);
+        
+        StringBuilder result = new StringBuilder();
+        int lastEnd = 0;
+        
+        while (m.find()) {
+            // 添加匹配位置之前的内容
+            result.append(content, lastEnd, m.start());
+            
+            // 找到匹配的结束大括号
+            int braceCount = 1;
+            int i = m.end();
+            while (i < content.length() && braceCount > 0) {
+                char c = content.charAt(i);
+                if (c == '{') braceCount++;
+                else if (c == '}') braceCount--;
+                i++;
+            }
+            
+            // 跳过这个块
+            lastEnd = i;
+        }
+        
+        // 添加剩余内容
+        result.append(content, lastEnd, content.length());
+        
+        return result.toString();
+    }
+    
+    /**
+     * 构建执行代码，调用 main 函数并传入变量
+     */
+    private String buildExecutorCode(String platform, Map<String, String> variables) {
+        // 将变量转换为 JSON 字符串
+        String variablesJson = "{}";
+        if (variables != null && !variables.isEmpty()) {
+            try {
+                variablesJson = objectMapper.writeValueAsString(variables);
+            } catch (Exception e) {
+                log.warn("Failed to serialize variables", e);
+            }
+        }
+        
         if ("android".equals(platform) || "ios".equals(platform)) {
             return "\n" +
                    "// === Auto-execution ===\n" +
@@ -405,7 +622,12 @@ public class SkillRunnerService {
                    "            process.exit(1);\n" +
                    "        }\n" +
                    "        console.log('[SKILL_LOG] Starting skill on device: ' + deviceId);\n" +
-                   "        const result = await main(deviceId);\n" +
+                   "        const variables = " + variablesJson + ";\n" +
+                   "        console.log('[SKILL_LOG] Variables:', JSON.stringify(variables));\n" +
+                   "        for (const [key, value] of Object.entries(variables)) {\n" +
+                   "            if (value !== undefined && value !== null) process.env[key] = String(value);\n" +
+                   "        }\n" +
+                   "        const result = await main(deviceId, variables);\n" +
                    "        console.log('[SKILL_LOG] Skill completed successfully');\n" +
                    "        console.log('[SKILL_LOG] Result:', JSON.stringify(result, null, 2));\n" +
                    "        process.exit(0);\n" +
@@ -421,7 +643,37 @@ public class SkillRunnerService {
                    "(async () => {\n" +
                    "    try {\n" +
                    "        console.log('[SKILL_LOG] Starting skill...');\n" +
-                   "        const result = await main();\n" +
+                   "        const variables = " + variablesJson + ";\n" +
+                   "        console.log('[SKILL_LOG] Variables:', JSON.stringify(variables));\n" +
+                   "        for (const [key, value] of Object.entries(variables)) {\n" +
+                   "            if (value !== undefined && value !== null) process.env[key] = String(value);\n" +
+                   "        }\n" +
+                   "        \n" +
+                   "        // 尝试获取 Chrome 调试端点\n" +
+                   "        let browserWSEndpoint = 'ws://127.0.0.1:9222/devtools/browser';\n" +
+                   "        try {\n" +
+                   "            const http = require('http');\n" +
+                   "            const versionUrl = 'http://127.0.0.1:9222/json/version';\n" +
+                   "            const versionData = await new Promise((resolve, reject) => {\n" +
+                   "                http.get(versionUrl, (res) => {\n" +
+                   "                    let data = '';\n" +
+                   "                    res.on('data', chunk => data += chunk);\n" +
+                   "                    res.on('end', () => resolve(data));\n" +
+                   "                }).on('error', reject);\n" +
+                   "            });\n" +
+                   "            const version = JSON.parse(versionData);\n" +
+                   "            if (version.webSocketDebuggerUrl) {\n" +
+                   "                browserWSEndpoint = version.webSocketDebuggerUrl;\n" +
+                   "                console.log('[SKILL_LOG] Found Chrome debug endpoint: ' + browserWSEndpoint);\n" +
+                   "            }\n" +
+                   "        } catch (e) {\n" +
+                   "            console.log('[SKILL_LOG] Using default Chrome debug endpoint');\n" +
+                   "        }\n" +
+                   "        \n" +
+                   "        // 将端点传递给 main 函数\n" +
+                   "        variables._browserWSEndpoint = browserWSEndpoint;\n" +
+                   "        \n" +
+                   "        const result = await main(variables);\n" +
                    "        console.log('[SKILL_LOG] Skill completed successfully');\n" +
                    "        console.log('[SKILL_LOG] Result:', JSON.stringify(result, null, 2));\n" +
                    "        process.exit(0);\n" +
@@ -434,14 +686,85 @@ public class SkillRunnerService {
         }
     }
 
+    /**
+     * 构建运行时知识库加载代码：
+     * 1. 扫描 ./knowledge/ 目录
+     * 2. 读取 knowledge.json 元数据
+     * 3. 文本文件 → 拼接为 context 字符串
+     * 4. 图片文件 → 转 base64，构造成 midscene 接受的 { name, url } 格式
+     * 5. 暴露 globalThis.__KNOWLEDGE__ = { context, texts, images }
+     */
+    private String buildKnowledgeLoaderCode() {
+        return "// === Knowledge Base Loader ===\n" +
+               "(function loadKnowledge(){\n" +
+               "    const _kbDir = _skillPath.join(process.cwd(), 'knowledge');\n" +
+               "    const kb = { context: '', texts: [], images: [] };\n" +
+               "    try {\n" +
+               "        if (!_skillFs.existsSync(_kbDir)) { globalThis.__KNOWLEDGE__ = kb; return; }\n" +
+               "        let manifest = [];\n" +
+               "        const manifestPath = _skillPath.join(_kbDir, 'knowledge.json');\n" +
+               "        if (_skillFs.existsSync(manifestPath)) {\n" +
+               "            try { manifest = JSON.parse(_skillFs.readFileSync(manifestPath, 'utf8')); } catch (e) {}\n" +
+               "        }\n" +
+               "        const metaOf = (name) => manifest.find(m => m && m.fileName === name) || {};\n" +
+               "        const imgExts = new Set(['.jpg','.jpeg','.png','.gif','.webp','.bmp']);\n" +
+               "        const txtExts = new Set(['.md','.txt','.json','.csv','.yml','.yaml','.html','.htm']);\n" +
+               "        const mimeOf = (ext) => ({ '.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.gif':'image/gif','.webp':'image/webp','.bmp':'image/bmp' }[ext] || 'image/png');\n" +
+               "        const files = _skillFs.readdirSync(_kbDir).filter(f => f !== 'knowledge.json');\n" +
+               "        const parts = [];\n" +
+               "        for (const name of files) {\n" +
+               "            const full = _skillPath.join(_kbDir, name);\n" +
+               "            const stat = _skillFs.statSync(full);\n" +
+               "            if (!stat.isFile()) continue;\n" +
+               "            const ext = _skillPath.extname(name).toLowerCase();\n" +
+               "            const meta = metaOf(name);\n" +
+               "            const desc = meta.description || '';\n" +
+               "            if (txtExts.has(ext)) {\n" +
+               "                try {\n" +
+               "                    const content = _skillFs.readFileSync(full, 'utf8');\n" +
+               "                    kb.texts.push({ name, description: desc, content });\n" +
+               "                    const header = desc ? `[文档: ${name}] ${desc}` : `[文档: ${name}]`;\n" +
+               "                    parts.push(header + '\\n' + content);\n" +
+               "                } catch (e) {\n" +
+               "                    console.log('[SKILL_LOG] Read text failed: ' + name);\n" +
+               "                }\n" +
+               "            } else if (imgExts.has(ext)) {\n" +
+               "                try {\n" +
+               "                    const buf = _skillFs.readFileSync(full);\n" +
+               "                    const url = 'data:' + mimeOf(ext) + ';base64,' + buf.toString('base64');\n" +
+               "                    kb.images.push({ name: desc || name, url, fileName: name, description: desc });\n" +
+               "                    const header = desc ? `[图片: ${name}] ${desc}` : `[图片: ${name}]`;\n" +
+               "                    parts.push(header + ' — 可通过 globalThis.__KNOWLEDGE__.images 引用传入 aiTap/aiAssert 的 images 参数');\n" +
+               "                } catch (e) {\n" +
+               "                    console.log('[SKILL_LOG] Read image failed: ' + name);\n" +
+               "                }\n" +
+               "            } else {\n" +
+               "                const header = desc ? `[附件: ${name}] ${desc}` : `[附件: ${name}]`;\n" +
+               "                parts.push(header);\n" +
+               "            }\n" +
+               "        }\n" +
+               "        if (parts.length > 0) {\n" +
+               "            kb.context = '以下是本任务的参考知识库（背景信息，请结合实际页面使用）：\\n\\n' + parts.join('\\n\\n---\\n\\n');\n" +
+               "            console.log('[SKILL_LOG] 📚 Knowledge loaded: ' + kb.texts.length + ' docs, ' + kb.images.length + ' images');\n" +
+               "        }\n" +
+               "    } catch (e) {\n" +
+               "        console.log('[SKILL_LOG] Knowledge load error: ' + e.message);\n" +
+               "    }\n" +
+               "    globalThis.__KNOWLEDGE__ = kb;\n" +
+               "})();\n";
+    }
+
     private String buildInstrumentationCode(String platform) {
         // 使用无缩进的字符串，避免 JS 语法错误
+        // 使用全局对象检查，避免与脚本中的 fs/path 重复声明
         return "// === Easy Skill Runtime Injection ===\n" +
-               "const fs = require('fs');\n" +
-               "const path = require('path');\n" +
+               "const _skillFs = global.fs || require('fs');\n" +
+               "const _skillPath = global.path || require('path');\n" +
                "let _stepCount = 0;\n" +
                "let _lastAgent = null;\n" +
                "const _screenshotDir = process.cwd();\n" +
+               "\n" +
+               buildKnowledgeLoaderCode() +
                "\n" +
                "async function _skillScreenshot(agent, label) {\n" +
                "    try {\n" +
@@ -455,7 +778,7 @@ public class SkillRunnerService {
                "                fullPage: false \n" +
                "            });\n" +
                "            const filename = `_skill_${label}_${Date.now()}.txt`;\n" +
-               "            fs.writeFileSync(path.join(_screenshotDir, filename), screenshot);\n" +
+               "            _skillFs.writeFileSync(_skillPath.join(_screenshotDir, filename), screenshot);\n" +
                "            console.log('[SKILL_SCREENSHOT]' + label + '|' + filename);\n" +
                "        }\n" +
                "    } catch (e) {\n" +
@@ -465,6 +788,20 @@ public class SkillRunnerService {
                "\n" +
                "function _wrapAgent(agent) {\n" +
                "    _lastAgent = agent;\n" +
+               "    try {\n" +
+               "        const kb = globalThis.__KNOWLEDGE__;\n" +
+               "        if (kb && kb.context) {\n" +
+               "            if (typeof agent.setAIActContext === 'function') {\n" +
+               "                agent.setAIActContext(kb.context);\n" +
+               "                console.log('[SKILL_LOG] 📚 agent.setAIActContext applied (' + kb.context.length + ' chars)');\n" +
+               "            } else if (typeof agent.setAIActionContext === 'function') {\n" +
+               "                agent.setAIActionContext(kb.context);\n" +
+               "                console.log('[SKILL_LOG] 📚 agent.setAIActionContext applied (legacy API)');\n" +
+               "            }\n" +
+               "        }\n" +
+               "    } catch (e) {\n" +
+               "        console.log('[SKILL_LOG] Knowledge context injection failed: ' + e.message);\n" +
+               "    }\n" +
                "    const methods = ['aiAct', 'aiTap', 'aiInput', 'aiScroll', 'aiQuery', 'aiAssert', 'aiWaitFor'];\n" +
                "    methods.forEach(method => {\n" +
                "        if (agent[method]) {\n" +
@@ -491,7 +828,14 @@ public class SkillRunnerService {
                "        const Original = mod.PuppeteerAgent;\n" +
                "        mod.PuppeteerAgent = class extends Original {\n" +
                "            constructor(page, opts) {\n" +
-               "                super(page, opts);\n" +
+               "                const merged = Object.assign({}, opts || {});\n" +
+               "                const kb = globalThis.__KNOWLEDGE__;\n" +
+               "                if (kb && kb.context) {\n" +
+               "                    merged.aiActContext = merged.aiActContext\n" +
+               "                        ? merged.aiActContext + '\\n\\n' + kb.context\n" +
+               "                        : kb.context;\n" +
+               "                }\n" +
+               "                super(page, merged);\n" +
                "                _wrapAgent(this);\n" +
                "            }\n" +
                "        };\n" +
@@ -539,24 +883,40 @@ public class SkillRunnerService {
             command.append("DEVICE_ID=").append(escapeShellArg(options.getDeviceId())).append(" ");
         }
         
+        // 添加自定义变量作为环境变量
+        if (options.getVariables() != null && !options.getVariables().isEmpty()) {
+            options.getVariables().forEach((key, value) -> {
+                if (key != null && value != null) {
+                    command.append(key).append("=").append(escapeShellArg(value)).append(" ");
+                }
+            });
+        }
+        
         // 使用 node 直接执行，并添加调试输出
         command.append("node scripts/main.js 2>&1");
         
-        logConsumer.accept("[系统] 开始执行脚本，超时时间: " + timeoutSeconds + "秒");
-        
+        int effectiveTimeout = (options.getTimeoutSeconds() != null && options.getTimeoutSeconds() > 0)
+            ? options.getTimeoutSeconds() : timeoutSeconds;
+        logConsumer.accept("[系统] 开始执行脚本，超时时间: " + effectiveTimeout + "秒"
+            + (options.getTimeoutSeconds() != null ? "（本次自定义）" : "（默认）"));
+
         try {
             int exitCode = runShellCommand(null, command.toString(), line -> {
                 logs.add(line);
                 parseAndForwardLog(line, logConsumer);
-            }, timeoutSeconds);
+            }, effectiveTimeout);
             
             boolean success = exitCode == 0;
             logConsumer.accept("[系统] 脚本执行完成，退出码: " + exitCode);
+            
+            // 尝试从日志中提取 JSON 结果
+            String resultData = extractResultFromLogs(logs);
             
             return RunResult.builder()
                 .success(success)
                 .exitCode(exitCode)
                 .logs(logs)
+                .data(resultData)
                 .build();
                 
         } catch (Exception e) {
@@ -591,6 +951,89 @@ public class SkillRunnerService {
             // 普通日志
             logConsumer.accept(line);
         }
+    }
+
+    /**
+     * 从日志中提取 JSON 结果
+     * 查找 [SKILL_LOG] Result: 后面的 JSON 数据
+     */
+    private String extractResultFromLogs(List<String> logs) {
+        // 首先查找 [SKILL_LOG] Result: 格式的输出
+        for (int i = logs.size() - 1; i >= 0; i--) {
+            String line = logs.get(i);
+            String resultPrefix = "[SKILL_LOG] Result:";
+            int resultIndex = line.indexOf(resultPrefix);
+            
+            if (resultIndex >= 0) {
+                // 提取 Result: 后面的 JSON 字符串
+                String jsonStr = line.substring(resultIndex + resultPrefix.length()).trim();
+                if (jsonStr.startsWith("{") && jsonStr.endsWith("}")) {
+                    return jsonStr;
+                }
+                // 如果 JSON 跨多行，尝试收集
+                if (jsonStr.startsWith("{")) {
+                    StringBuilder fullJson = new StringBuilder(jsonStr);
+                    int braceCount = countBraces(jsonStr);
+                    int j = i + 1;
+                    while (j < logs.size() && braceCount > 0) {
+                        String nextLine = logs.get(j);
+                        fullJson.append(nextLine);
+                        braceCount += countBraces(nextLine);
+                        j++;
+                    }
+                    if (braceCount == 0) {
+                        return fullJson.toString();
+                    }
+                }
+            }
+        }
+        
+        // 备选：查找任何包含 success 字段的 JSON 对象（兼容旧格式）
+        StringBuilder jsonBuilder = new StringBuilder();
+        boolean inJson = false;
+        int braceCount = 0;
+        
+        for (int i = logs.size() - 1; i >= 0; i--) {
+            String line = logs.get(i);
+            
+            // 从后向前查找 JSON 结束标记
+            if (!inJson && line.trim().endsWith("}")) {
+                inJson = true;
+            }
+            
+            if (inJson) {
+                jsonBuilder.insert(0, line);
+                
+                // 计算大括号数量
+                for (char c : line.toCharArray()) {
+                    if (c == '}') braceCount++;
+                    if (c == '{') braceCount--;
+                }
+                
+                // 找到 JSON 开始
+                if (braceCount == 0) {
+                    String jsonStr = jsonBuilder.toString().trim();
+                    if (jsonStr.startsWith("{") && jsonStr.contains("success")) {
+                        return jsonStr;
+                    }
+                    break;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * 计算字符串中大括号的净数量（{ 为 +1，} 为 -1）
+     */
+    private int countBraces(String str) {
+        int count = 0;
+        for (char c : str.toCharArray()) {
+            if (c == '{') count++;
+            if (c == '}') count--;
+        }
+        return count;
     }
 
     private List<RunResult.Screenshot> collectScreenshots(Path tempDir) {

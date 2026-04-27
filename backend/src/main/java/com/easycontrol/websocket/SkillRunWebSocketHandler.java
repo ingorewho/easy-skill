@@ -12,6 +12,7 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -67,6 +68,21 @@ public class SkillRunWebSocketHandler extends TextWebSocketHandler {
         String targetUrl = json.has("targetUrl") ? json.get("targetUrl").asText() : null;
         String deviceId = json.has("deviceId") ? json.get("deviceId").asText() : null;
         boolean headless = json.has("headless") ? json.get("headless").asBoolean() : false;
+        
+        // 解析变量值
+        Map<String, String> variables = new HashMap<>();
+        if (json.has("variables") && json.get("variables").isObject()) {
+            JsonNode varsNode = json.get("variables");
+            varsNode.fields().forEachRemaining(entry -> {
+                variables.put(entry.getKey(), entry.getValue().asText(""));
+            });
+        }
+
+        Integer timeoutSeconds = null;
+        if (json.has("timeoutSeconds") && !json.get("timeoutSeconds").isNull()) {
+            int t = json.get("timeoutSeconds").asInt(0);
+            if (t > 0) timeoutSeconds = t;
+        }
 
         SkillRunnerService.RunOptions options = SkillRunnerService.RunOptions.builder()
             .platform(platform)
@@ -74,6 +90,8 @@ public class SkillRunWebSocketHandler extends TextWebSocketHandler {
             .deviceId(deviceId)
             .headless(headless)
             .maxSteps(20)
+            .variables(variables)
+            .timeoutSeconds(timeoutSeconds)
             .build();
 
         sendMessage(session, Map.of(
@@ -98,19 +116,42 @@ public class SkillRunWebSocketHandler extends TextWebSocketHandler {
             runningTasks.remove(session.getId());
             
             if (error != null) {
-                sendMessage(session, Map.of(
-                    "type", "error",
-                    "message", error.getMessage()
-                ));
+                // 执行异常（Java 层面）
+                Map<String, Object> message = new HashMap<>();
+                message.put("type", "completed");
+                message.put("success", false);
+                message.put("message", error.getMessage());
+                message.put("exitCode", -1);
+                message.put("durationMs", 0);
+                message.put("data", null);
+                sendMessage(session, message);
             } else {
-                sendMessage(session, Map.of(
-                    "type", "completed",
-                    "success", result.isSuccess(),
-                    "exitCode", result.getExitCode(),
-                    "durationMs", result.getDurationMs(),
-                    "screenshots", result.getScreenshots(),
-                    "message", result.isSuccess() ? "运行成功" : "运行失败"
-                ));
+                // 执行完成（无论成功或失败）
+                Map<String, Object> message = new HashMap<>();
+                message.put("type", "completed");
+                message.put("success", result.isSuccess());
+                
+                // message: 成功显示"运行成功"，失败显示详细错误信息
+                if (result.isSuccess()) {
+                    message.put("message", "运行成功");
+                } else {
+                    // 优先使用 error 字段，否则显示"运行失败"
+                    String errorMsg = result.getError();
+                    message.put("message", errorMsg != null && !errorMsg.isEmpty() ? errorMsg : "运行失败");
+                }
+                
+                message.put("exitCode", result.getExitCode());
+                message.put("durationMs", result.getDurationMs());
+                message.put("screenshots", result.getScreenshots());
+                
+                // data: 脚本返回的数据（JSON 字符串）
+                if (result.getData() != null) {
+                    message.put("data", result.getData());
+                } else {
+                    message.put("data", null);
+                }
+                
+                sendMessage(session, message);
             }
         });
     }

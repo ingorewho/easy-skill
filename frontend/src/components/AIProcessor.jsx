@@ -58,7 +58,7 @@ export default function AIProcessor() {
           annotationJson: f.annotationJson || '',
         })),
       })
-      setSkill(skill.skillId, skill.skillName, skill.files)
+      setSkill(skill.skillId, skill.skillName, skill.files, skill.variables)
       setActiveTab('skill')
     } catch (e) {
       setError(e.message)

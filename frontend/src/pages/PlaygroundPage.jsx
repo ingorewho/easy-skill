@@ -33,135 +33,116 @@ export default function PlaygroundPage() {
   const [interval, setInterval] = useState(3)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
-  
+
   const fileInputRef = useRef()
 
-  // 处理从首页直接进入 skill 标签的情况
   useEffect(() => {
-    if (videoId === 'history') {
-      setActiveTab('skill')
-    }
+    if (videoId === 'history' || videoId === 'frames') setActiveTab('skill')
   }, [videoId, setActiveTab])
 
-  // 不再强制跳转，允许空界面
-  // useEffect(() => {
-  //   if (!storeVideoId && videoId !== 'history') {
-  //     navigate('/')
-  //   }
-  // }, [storeVideoId, videoId, navigate])
-
   const handleAutoExtract = async () => {
-    setExtracting(true)
-    setExtractError(null)
+    setExtracting(true); setExtractError(null)
     try {
       const frames = await extractFramesAuto(videoId, interval)
       addFrames(frames)
-    } catch (e) {
-      setExtractError(e.message)
-    } finally {
-      setExtracting(false)
-    }
+    } catch (e) { setExtractError(e.message) }
+    finally { setExtracting(false) }
   }
 
   const handleManualCapture = async (timestamp) => {
-    setExtracting(true)
-    setExtractError(null)
+    setExtracting(true); setExtractError(null)
     try {
       const frames = await extractFramesManual(videoId, [timestamp])
       addFrames(frames)
-    } catch (e) {
-      setExtractError(e.message)
-    } finally {
-      setExtracting(false)
-    }
+    } catch (e) { setExtractError(e.message) }
+    finally { setExtracting(false) }
   }
 
   const handleReupload = async (file) => {
-    if (!file || !file.type.startsWith('video/')) {
-      alert('请上传视频文件（MP4、MOV 等）')
-      return
-    }
-    
-    setUploading(true)
-    setUploadProgress(0)
-    reset()
-
+    if (!file || !file.type.startsWith('video/')) { alert('请上传视频文件'); return }
+    setUploading(true); setUploadProgress(0); reset()
     try {
       const res = await uploadVideo(file, setUploadProgress)
       setVideo(res.videoId, res.filename, res.duration)
-      // 重置到标注页并导航到新视频
       setActiveTab('annotate')
       navigate(`/playground/${res.videoId}`)
-    } catch (e) {
-      alert('上传失败: ' + e.message)
-    } finally {
-      setUploading(false)
-    }
+    } catch (e) { alert('上传失败: ' + e.message) }
+    finally { setUploading(false) }
   }
 
   return (
     <div className='min-h-screen flex flex-col'>
       {/* Top bar */}
-      <header className='flex items-center gap-4 px-6 py-3 bg-slate-900 border-b border-slate-800'>
-        <button
-          onClick={() => navigate('/')}
-          className='text-slate-400 hover:text-white transition-colors text-sm'
-        >
-          ← 返回
-        </button>
-        <h1 className='text-white font-semibold'>Easy Skill</h1>
+      <header className='sticky top-0 z-20 bg-paper-100/85 backdrop-blur-md border-b hairline'>
+        <div className='max-w-[1440px] mx-auto px-8 py-4 flex items-center gap-6'>
+          <button
+            onClick={() => navigate('/')}
+            className='group flex items-center gap-2 text-ink-500 hover:text-ink-900 transition-colors text-sm'
+          >
+            <svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.6' strokeLinecap='round' strokeLinejoin='round' className='transition-transform duration-300 group-hover:-translate-x-0.5'>
+              <path d='M19 12H5M12 19l-7-7 7-7' />
+            </svg>
+            <span>返回</span>
+          </button>
 
-        {/* 重新上传按钮 */}
-        <input
-          ref={fileInputRef}
-          type='file'
-          accept='video/*'
-          className='hidden'
-          onChange={(e) => handleReupload(e.target.files[0])}
-        />
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          className='ml-4 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 text-sm rounded-lg transition-colors flex items-center gap-2'
-        >
-          {uploading ? (
-            <>
-              <span className='w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin' />
-              <span>上传中 {uploadProgress}%</span>
-            </>
-          ) : (
-            <>
-              <span>📤</span>
-              <span>重新上传</span>
-            </>
-          )}
-        </button>
+          <div className='w-px h-5 bg-ink-900/10'></div>
 
-        {/* 保存资源按钮 */}
-        <div className='ml-2'>
-          <SaveResourceButton />
-        </div>
+          <div className='flex items-baseline gap-2'>
+            <span className='font-display text-xl text-ink-900' style={{ fontVariationSettings: "'opsz' 120" }}>
+              Easy <span className='italic text-umber-500'>Skill</span>
+            </span>
+            <span className='eyebrow'>Studio</span>
+          </div>
 
-        {/* Tabs */}
-        <div className='ml-auto flex gap-1 bg-slate-800 rounded-lg p-1'>
-          {[
-            { id: 'annotate', label: '标注帧', disabled: videoId === 'history' },
-            { id: 'skill', label: 'Skill 编辑器', badge: !!skillId },
-          ].map(tab => (
+          <div className='ml-6 flex items-center gap-2'>
+            <input
+              ref={fileInputRef} type='file' accept='video/*' className='hidden'
+              onChange={(e) => handleReupload(e.target.files[0])}
+            />
             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              disabled={tab.disabled}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors relative
-                ${activeTab === tab.id ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-white'}
-                ${tab.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className='btn-ghost disabled:opacity-60'
             >
-              {tab.label}
-              {tab.badge && (
-                <span className='absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full' />
+              {uploading ? (
+                <>
+                  <span className='w-3 h-3 rounded-full border-2 border-umber-500/30 border-t-umber-500 animate-spin' />
+                  <span className='font-mono text-[11px]'>{uploadProgress}%</span>
+                </>
+              ) : (
+                <>
+                  <svg width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.6' strokeLinecap='round' strokeLinejoin='round'>
+                    <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12' />
+                  </svg>
+                  <span>重新上传</span>
+                </>
               )}
             </button>
-          ))}
+
+            <SaveResourceButton />
+          </div>
+
+          {/* Tabs */}
+          <div className='ml-auto inline-flex rounded-full bg-paper-200/70 p-1 text-[13px]'>
+            {[
+              { id: 'annotate', label: '标注帧', disabled: videoId === 'history' },
+              { id: 'skill', label: 'Skill 编辑器', badge: !!skillId },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                disabled={tab.disabled}
+                className={`relative px-4 py-1.5 rounded-full transition-all duration-300
+                  ${activeTab === tab.id ? 'bg-ink-900 text-paper-50 shadow-soft' : 'text-ink-500 hover:text-ink-900'}
+                  ${tab.disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+              >
+                {tab.label}
+                {tab.badge && (
+                  <span className='absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-sage-500 ring-2 ring-paper-100' />
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -169,172 +150,190 @@ export default function PlaygroundPage() {
       <div className='flex-1 flex overflow-hidden'>
         {activeTab === 'annotate' ? (
           !storeVideoId ? (
-            // 空界面 - 提示上传视频
-            <div className='flex-1 flex flex-col items-center justify-center p-8'>
-              <div className='text-center max-w-md'>
-                <div className='text-6xl mb-6'>🎬</div>
-                <h2 className='text-2xl font-bold text-white mb-3'>开始创建 Skill</h2>
-                <p className='text-slate-400 mb-8'>上传操作视频，AI 将自动生成可复用的自动化脚本</p>
-                
-                {/* 上传区域 */}
-                <div
-                  className='border-2 border-dashed border-slate-600 hover:border-blue-500 bg-slate-800/50 rounded-2xl p-12 text-center cursor-pointer transition-all'
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <div className='text-4xl mb-3'>📁</div>
-                  <p className='text-slate-300 text-lg mb-2'>点击选择视频文件</p>
-                  <p className='text-slate-500 text-sm'>支持 MP4、MOV、AVI 等格式</p>
-                </div>
-
-                {/* 或从归档选择 */}
-                <div className='mt-8 w-full max-w-md'>
-                  <p className='text-slate-500 text-sm mb-3'>或者使用已保存的资源</p>
-                  <ArchiveBrowser 
-                    onSelectVideo={(video, frames) => {
-                      console.log('Selected video:', video, 'frames:', frames)
-                      // 加载关联的帧（视频文件可能已清理，只加载帧）
-                      if (frames && frames.length > 0) {
-                        // 先清空现有帧
-                        useAppStore.setState({ frames: [] })
-                        // 添加归档的帧
-                        const formattedFrames = frames.map(f => ({
-                          frameId: f.frameId,
-                          timestamp: f.timestamp,
-                          base64Image: f.base64Preview || f.base64Image,
-                          description: f.description,
-                          annotationJson: f.annotationJson
-                        }))
-                        formattedFrames.forEach(f => addFrames([f]))
-                        // 切换到 skill 标签
-                        setActiveTab('skill')
-                      } else {
-                        alert('该视频没有保存关联的帧。提示：保存视频后需要再保存帧才能建立关联。')
-                      }
-                    }}
-                    onSelectFrames={(frames) => {
-                      // 直接加载帧（用于生成 Skill）
-                      if (frames && frames.length > 0) {
-                        // 先清空现有帧
-                        useAppStore.setState({ frames: [] })
-                        // 添加归档的帧
-                        const formattedFrames = frames.map(f => ({
-                          frameId: f.frameId,
-                          timestamp: f.timestamp,
-                          base64Image: f.base64Preview || f.base64Image,
-                          description: f.description,
-                          annotationJson: f.annotationJson
-                        }))
-                        formattedFrames.forEach(f => addFrames([f]))
-                        setActiveTab('skill')
-                      }
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
+            <EmptyUploadHint onClick={() => fileInputRef.current?.click()} navigate={navigate}
+              setVideo={setVideo} setActiveTab={setActiveTab} addFrames={addFrames} />
           ) : (
-            <div className='flex-1 flex gap-4 p-4 overflow-hidden'>
-              {/* Left: Video + Timeline */}
+            <div className='flex-1 flex gap-5 px-6 py-5 overflow-hidden'>
               <div className='flex-1 flex flex-col gap-4 min-w-0'>
-                <VideoPlayer
-                  videoId={videoId}
-                  duration={videoDuration}
-                  onTimeSelect={handleManualCapture}
-                />
+                <div className='card-paper p-3'>
+                  <VideoPlayer videoId={videoId} duration={videoDuration} onTimeSelect={handleManualCapture} />
+                </div>
 
-                {/* Extract controls */}
-                <div className='flex items-center gap-3'>
+                <div className='flex items-center gap-3 px-1'>
                   <button
                     onClick={handleAutoExtract}
                     disabled={extracting}
-                    className='px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-sm rounded-lg transition-colors'
+                    className='btn-primary disabled:opacity-60'
                   >
-                    {extracting ? '抽帧中...' : '⚡ 自动抽帧'}
+                    {extracting ? (
+                      <>
+                        <span className='w-3 h-3 rounded-full border-2 border-paper-50/30 border-t-paper-50 animate-spin' />
+                        <span>抽帧中</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round'>
+                          <path d='M13 2L4.09 12.97 12 13.5l-1 8.5 8.91-10.97L12 10.5l1-8.5z' />
+                        </svg>
+                        <span>自动抽帧</span>
+                      </>
+                    )}
                   </button>
-                  <span className='text-slate-400 text-sm'>每</span>
-                  <input
-                    type='number'
-                    min={1}
-                    max={60}
-                    value={interval}
-                    onChange={e => setInterval(Math.max(1, Math.min(60, Number(e.target.value))))}
-                    className='w-14 bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-sm text-center outline-none focus:border-blue-500 transition-colors'
-                  />
-                  <span className='text-slate-400 text-sm'>秒取一帧</span>
-                  {extractError && (
-                    <span className='text-red-400 text-sm'>{extractError}</span>
-                  )}
+                  <div className='flex items-center gap-2 text-ink-500 text-sm'>
+                    <span>每</span>
+                    <input
+                      type='number' min={1} max={60} value={interval}
+                      onChange={e => setInterval(Math.max(1, Math.min(60, Number(e.target.value))))}
+                      className='w-14 bg-paper-50 border border-ink-900/10 rounded-lg px-2 py-1.5 text-ink-900 text-sm text-center outline-none focus:border-umber-500 transition-colors font-mono tabular-nums'
+                    />
+                    <span>秒取一帧</span>
+                  </div>
+                  {extractError && <span className='text-clay-500 text-sm'>{extractError}</span>}
                 </div>
 
-                {/* Frame timeline */}
-                <div className='bg-slate-800/50 rounded-xl p-3'>
-                  <h3 className='text-slate-400 text-xs uppercase tracking-wider mb-2'>帧时间轴</h3>
+                <div className='card-paper p-4 min-w-0 overflow-hidden'>
+                  <div className='eyebrow mb-3'>Timeline · 帧序</div>
                   <FrameTimeline />
                 </div>
 
-                {/* Annotator */}
-                <div className='flex-1'>
-                  <h3 className='text-slate-400 text-xs uppercase tracking-wider mb-2'>画布标注</h3>
-                  <FrameAnnotator />
+                <div className='flex-1 card-paper p-4 min-h-0 flex flex-col'>
+                  <div className='eyebrow mb-3'>Canvas · 标注</div>
+                  <div className='flex-1 min-h-0'>
+                    <FrameAnnotator />
+                  </div>
                 </div>
               </div>
 
-              {/* Right sidebar -- 有视频时显示 */}
-              <div className='w-72 flex flex-col gap-4 overflow-y-auto scrollbar-thin'>
-                {/* Frame list */}
-                <div className='bg-slate-800/50 rounded-xl p-3'>
-                  <h3 className='text-slate-400 text-xs uppercase tracking-wider mb-2'>帧列表</h3>
+              <div className='w-80 flex flex-col gap-4 overflow-y-auto scrollbar-thin pr-1'>
+                <div className='card-paper p-4'>
+                  <div className='eyebrow mb-3'>Frames · 帧列表</div>
                   <FrameList />
                 </div>
-
-                {/* Requirement with History */}
-                <div className='bg-slate-800/50 rounded-xl p-3'>
+                <div className='card-paper p-4'>
                   <RequirementHistorySelector />
                 </div>
-
-                {/* Generate */}
-                <div className='bg-slate-800/50 rounded-xl p-3'>
+                <div className='card-paper p-4'>
                   <AIProcessor />
                 </div>
-
-                {/* Archive Browser */}
                 <ArchiveBrowser />
               </div>
             </div>
-          )  // 结束 !storeVideoId 三元运算符
+          )
         ) : (
-          <div className='flex-1 flex gap-4 p-4 overflow-hidden'>
-            {/* Left: skill editor or empty hint */}
-            <div className='flex-1 flex flex-col gap-3 overflow-hidden'>
+          <div className='flex-1 flex gap-5 px-6 py-5 overflow-hidden'>
+            {/* Left sidebar · Skill 仓库（常驻） */}
+            <div className='w-72 flex flex-col gap-4 overflow-y-auto scrollbar-thin'>
+              <div className='card-paper p-4'>
+                <div className='eyebrow mb-3'>Repository · Skill 仓库</div>
+                <SkillList />
+              </div>
+            </div>
+
+            {/* Center · 编辑器 */}
+            <div className='flex-1 flex flex-col gap-4 min-h-0 min-w-0'>
               {skillId ? (
                 <>
-                  <SkillExport />
-                  <div className='flex-1 overflow-hidden'>
+                  <div className='card-paper p-4'><SkillExport /></div>
+                  <div className='flex-1 min-h-0 relative'>
                     <SkillEditor />
                   </div>
                 </>
               ) : (
-                <div className='flex-1 flex items-center justify-center text-slate-500'>
-                  <div className='text-center'>
-                    <div className='text-5xl mb-4'>⚡</div>
-                    <p>请先在「标注帧」页生成 Skill，或从历史记录中加载</p>
+                <div className='flex-1 flex items-center justify-center'>
+                  <div className='text-center max-w-sm'>
+                    <div className='mx-auto w-14 h-14 rounded-full border hairline-strong flex items-center justify-center text-ink-400 mb-6'>
+                      <svg width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.3' strokeLinecap='round' strokeLinejoin='round'>
+                        <path d='M13 2L4.09 12.97 12 13.5l-1 8.5 8.91-10.97L12 10.5l1-8.5z' />
+                      </svg>
+                    </div>
+                    <div className='font-display text-2xl text-ink-900 mb-3' style={{ fontVariationSettings: "'opsz' 120" }}>
+                      还没有 Skill
+                    </div>
+                    <p className='text-ink-500 text-sm leading-relaxed'>
+                      请先在「标注帧」页生成 Skill，或从左侧 Skill 仓库选择已有的。
+                    </p>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Right sidebar: runner + history */}
-            <div className='w-80 flex flex-col gap-3 overflow-y-auto scrollbar-thin'>
-              {skillId && (
-                <SkillRunner />
-              )}
-              <div className='bg-slate-800/50 rounded-xl p-3'>
-                <h3 className='text-slate-400 text-xs uppercase tracking-wider mb-2'>Skill 仓库</h3>
-                <SkillList />
+            {/* Right sidebar · Runner（仅在选中 Skill 时显示） */}
+            {skillId && (
+              <div className='w-[360px] flex flex-col gap-4 overflow-y-auto scrollbar-thin pr-1'>
+                <div className='card-paper p-4'><SkillRunner /></div>
               </div>
-            </div>
+            )}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+function EmptyUploadHint({ onClick, navigate, setVideo, setActiveTab, addFrames }) {
+  return (
+    <div className='flex-1 flex flex-col items-center justify-center px-8 py-16'>
+      <div className='text-center max-w-lg'>
+        <div className='eyebrow mb-5'>Step · 01 — Upload</div>
+        <h2 className='font-display text-4xl text-ink-900 mb-4' style={{ fontVariationSettings: "'opsz' 120" }}>
+          先上传一段<span className='italic text-umber-500'>视频</span>
+        </h2>
+        <p className='text-ink-500 text-sm leading-relaxed mb-10 max-w-sm mx-auto'>
+          任何操作录屏都可以。AI 会分析画面与你的操作流程，生成可直接运行的自动化脚本。
+        </p>
+
+        <button
+          onClick={onClick}
+          className='group card-paper w-full py-10 px-8 cursor-pointer transition-all duration-500 hover:-translate-y-0.5 hover:shadow-lift text-left'
+        >
+          <div className='flex items-center gap-6'>
+            <div className='w-14 h-14 rounded-full bg-gradient-to-br from-paper-200 to-paper-300 flex items-center justify-center shadow-inset-hair'>
+              <svg width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='var(--ink-700)' strokeWidth='1.4' strokeLinecap='round' strokeLinejoin='round'>
+                <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12' />
+              </svg>
+            </div>
+            <div className='flex-1'>
+              <div className='font-display text-xl text-ink-900'>点击选择文件</div>
+              <div className='text-ink-500 text-sm mt-1'>支持 MP4、MOV、AVI 等格式</div>
+            </div>
+            <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round'
+              className='text-ink-400 transition-transform duration-500 group-hover:translate-x-1'>
+              <path d='M5 12h14M13 5l7 7-7 7' />
+            </svg>
+          </div>
+        </button>
+
+        <div className='mt-10 pt-8 border-t hairline'>
+          <div className='eyebrow mb-4'>Or · 使用已保存资源</div>
+          <ArchiveBrowser
+            onSelectVideo={(video, frames) => {
+              const archiveVideoId = video.id || video.videoId
+              setVideo(archiveVideoId, video.filename, video.duration || 0)
+              if (frames && frames.length > 0) {
+                useAppStore.setState({ frames: [] })
+                const formatted = frames.map(f => ({
+                  frameId: f.frameId, timestamp: f.timestamp,
+                  base64Image: f.base64Preview || f.base64Image,
+                  description: f.description, annotationJson: f.annotationJson,
+                }))
+                formatted.forEach(f => addFrames([f]))
+              }
+              setActiveTab('skill')
+            }}
+            onSelectFrames={(frames) => {
+              if (frames && frames.length > 0) {
+                useAppStore.setState({ frames: [] })
+                const formatted = frames.map(f => ({
+                  frameId: f.frameId, timestamp: f.timestamp,
+                  base64Image: f.base64Preview || f.base64Image,
+                  description: f.description, annotationJson: f.annotationJson,
+                }))
+                formatted.forEach(f => addFrames([f]))
+                setActiveTab('skill')
+              }
+            }}
+          />
+        </div>
       </div>
     </div>
   )

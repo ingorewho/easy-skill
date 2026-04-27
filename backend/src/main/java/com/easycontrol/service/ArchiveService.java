@@ -28,13 +28,13 @@ public class ArchiveService {
     private final SkillService skillService;
     private final VideoService videoService;
 
-    @Value("${app.archive-dir:${user.home}/easy-control/archives}")
+    @Value("${app.archive-dir:${user.home}/easy-skill/archives}")
     private String archiveDir;
 
-    @Value("${app.upload-dir:${user.home}/easy-control/uploads}")
+    @Value("${app.upload-dir:${user.home}/easy-skill/uploads}")
     private String uploadDir;
 
-    @Value("${app.skills-dir:${user.home}/easy-control/skills}")
+    @Value("${app.skills-dir:${user.home}/easy-skill/skills}")
     private String skillsDir;
 
     // ==================== 视频归档 ====================
@@ -57,14 +57,24 @@ public class ArchiveService {
         Path destPath = archivePath.resolve("video" + ext);
         Files.copy(videoPath, destPath, StandardCopyOption.REPLACE_EXISTING);
 
+        // 获取视频时长
+        Long duration = null;
+        try {
+            duration = videoService.getVideoDuration(videoId);
+        } catch (Exception e) {
+            log.warn("Failed to get video duration: {}", e.getMessage());
+        }
+
         // 创建视频归档记录
         VideoArchive archive = VideoArchive.builder()
             .id(archiveId)
             .videoId(videoId)
             .filename(videoPath.getFileName().toString())
+            .duration(duration)
             .fileSize(Files.size(destPath))
             .filePath(destPath.toString())
             .description(description)
+            .frameCount(0) // 初始为0，保存帧时更新
             .build();
 
         return videoArchiveRepository.save(archive);
@@ -101,16 +111,22 @@ public class ArchiveService {
     // ==================== 帧归档 ====================
 
     @Transactional
-    public FrameArchive saveFrame(String frameId, String videoId, Double timestamp, 
-                                   String base64Image, String description, 
+    public FrameArchive saveFrame(String frameId, String videoId, Double timestamp,
+                                   String base64Image, String description,
                                    String annotationJson, String videoArchiveId) throws IOException {
         String archiveId = UUID.randomUUID().toString();
         Path archivePath = Paths.get(archiveDir, "frames", archiveId);
         Files.createDirectories(archivePath);
 
+        // 去除可能存在的 data URL 前缀
+        String pureBase64 = base64Image;
+        if (base64Image.contains(",")) {
+            pureBase64 = base64Image.substring(base64Image.indexOf(",") + 1);
+        }
+
         // 保存图片
         Path imagePath = archivePath.resolve("frame.jpg");
-        byte[] imageBytes = Base64.getDecoder().decode(base64Image);
+        byte[] imageBytes = Base64.getDecoder().decode(pureBase64);
         Files.write(imagePath, imageBytes);
 
         // 创建缩略图（简化处理，实际可以用 Thumbnailator）
@@ -127,18 +143,57 @@ public class ArchiveService {
             .thumbnailPath(thumbnailPath.toString())
             .description(description)
             .annotationJson(annotationJson)
-            .base64Preview(base64Image.substring(0, Math.min(base64Image.length(), 1000)))
+            .base64Preview(pureBase64)
             .build();
 
         return frameArchiveRepository.save(archive);
     }
 
     public List<FrameArchive> listFrameArchives() {
-        return frameArchiveRepository.findAllByOrderByCreatedAtDesc();
+        List<FrameArchive> frames = frameArchiveRepository.findAllByOrderByCreatedAtDesc();
+        // 填充完整的 base64 图片数据
+        for (FrameArchive frame : frames) {
+            try {
+                if (frame.getImagePath() != null) {
+                    Path imagePath = Paths.get(frame.getImagePath());
+                    if (Files.exists(imagePath)) {
+                        byte[] imageBytes = Files.readAllBytes(imagePath);
+                        String base64 = Base64.getEncoder().encodeToString(imageBytes);
+                        frame.setBase64Image(base64);
+                        frame.setBase64Preview(base64);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to load image for frame {}: {}", frame.getId(), e.getMessage());
+            }
+        }
+        return frames;
     }
 
     public List<FrameArchive> getFramesByVideoArchive(String videoArchiveId) {
-        return frameArchiveRepository.findByVideoArchiveIdOrderByTimestampAsc(videoArchiveId);
+        List<FrameArchive> frames = frameArchiveRepository.findByVideoArchiveIdOrderByTimestampAsc(videoArchiveId);
+        // 填充完整的 base64 图片数据
+        for (FrameArchive frame : frames) {
+            try {
+                if (frame.getImagePath() != null) {
+                    Path imagePath = Paths.get(frame.getImagePath());
+                    if (Files.exists(imagePath)) {
+                        byte[] imageBytes = Files.readAllBytes(imagePath);
+                        String base64 = Base64.getEncoder().encodeToString(imageBytes);
+                        frame.setBase64Image(base64);
+                        // 同时更新 base64Preview 为完整图片
+                        frame.setBase64Preview(base64);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to load image for frame {}: {}", frame.getId(), e.getMessage());
+            }
+        }
+        return frames;
+    }
+
+    public Optional<FrameArchive> getFrameArchive(String id) {
+        return frameArchiveRepository.findById(id);
     }
 
     @Transactional
@@ -210,5 +265,43 @@ public class ArchiveService {
     @Transactional
     public void updateRequirementUseCount(String id) {
         requirementHistoryRepository.incrementUseCount(id, LocalDateTime.now());
+    }
+
+    // ==================== 一键保存 ====================
+
+    @Transactional
+    public Map<String, Object> saveAll(String videoId, String description, List<Map<String, Object>> frames) throws IOException {
+        // 1. 保存视频
+        VideoArchive videoArchive = saveVideo(videoId, description);
+
+        // 2. 批量保存帧
+        List<FrameArchive> savedFrames = new ArrayList<>();
+        for (Map<String, Object> frame : frames) {
+            try {
+                FrameArchive saved = saveFrame(
+                    (String) frame.get("frameId"),
+                    videoId,
+                    ((Number) frame.get("timestamp")).doubleValue(),
+                    (String) frame.get("base64Image"),
+                    (String) frame.get("description"),
+                    (String) frame.get("annotationJson"),
+                    videoArchive.getId()
+                );
+                savedFrames.add(saved);
+            } catch (Exception e) {
+                log.warn("Failed to save frame {}: {}", frame.get("frameId"), e.getMessage());
+            }
+        }
+
+        // 3. 更新视频的 frameCount
+        if (!savedFrames.isEmpty()) {
+            videoArchive.setFrameCount(savedFrames.size());
+            videoArchiveRepository.save(videoArchive);
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("videoArchive", videoArchive);
+        result.put("savedFrames", savedFrames);
+        return result;
     }
 }

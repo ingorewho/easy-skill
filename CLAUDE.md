@@ -346,15 +346,15 @@ spring:
       max-file-size: 500MB
       max-request-size: 500MB
   datasource:
-    url: jdbc:sqlite:${user.home}/easy-control/easy-skill.db
+    url: jdbc:sqlite:${user.home}/easy-skill/easy-skill.db
   jpa:
     hibernate:
       ddl-auto: update
 
 app:
-  upload-dir: ${user.home}/easy-control/uploads
-  skills-dir: ${user.home}/easy-control/skills
-  archive-dir: ${user.home}/easy-control/archives
+  upload-dir: ${user.home}/easy-skill/uploads
+  skills-dir: ${user.home}/easy-skill/skills
+  archive-dir: ${user.home}/easy-skill/archives
   ffmpeg-path: ffmpeg
   ai-api-key: your_api_key
   ai-base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
@@ -449,6 +449,6 @@ Skill 运行器通过 WebSocket 与后端通信：
 
 1. **Java 版本**: 必须使用 Java 17+（Spring Boot 3.2.3 要求）
 2. **FFmpeg**: 需要安装并在 PATH 中
-3. **数据库**: SQLite 自动创建在 `~/easy-control/easy-skill.db`
-4. **文件存储**: 所有上传和生成的文件存储在 `~/easy-control/` 子目录
+3. **数据库**: SQLite 自动创建在 `~/easy-skill/easy-skill.db`
+4. **文件存储**: 所有上传和生成的文件存储在 `~/easy-skill/` 子目录
 5. ** Skill 运行**: 需要 Node.js 和对应平台的 midscene 依赖

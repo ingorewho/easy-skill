@@ -10,6 +10,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 
@@ -90,6 +93,27 @@ public class ArchiveController {
         return ResponseEntity.ok(archiveService.getFramesByVideoArchive(videoArchiveId));
     }
 
+    @GetMapping("/frames/{id}/image")
+    public ResponseEntity<byte[]> getFrameImage(@PathVariable String id) {
+        try {
+            FrameArchive archive = archiveService.getFrameArchive(id).orElse(null);
+            if (archive == null || archive.getImagePath() == null) {
+                return ResponseEntity.notFound().build();
+            }
+            Path imagePath = Paths.get(archive.getImagePath());
+            if (!Files.exists(imagePath)) {
+                return ResponseEntity.notFound().build();
+            }
+            byte[] imageBytes = Files.readAllBytes(imagePath);
+            return ResponseEntity.ok()
+                .header("Content-Type", "image/jpeg")
+                .body(imageBytes);
+        } catch (Exception e) {
+            log.error("Failed to get frame image", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
     @DeleteMapping("/frames/{id}")
     public ResponseEntity<Void> deleteFrame(@PathVariable String id) {
         try {
@@ -142,6 +166,23 @@ public class ArchiveController {
         return ResponseEntity.ok().build();
     }
 
+    // ==================== 一键保存 ====================
+
+    @PostMapping("/save-all")
+    public ResponseEntity<Map<String, Object>> saveAll(@RequestBody SaveAllRequest request) {
+        try {
+            Map<String, Object> result = archiveService.saveAll(
+                request.videoId,
+                request.description,
+                request.frames
+            );
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Failed to save all resources", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
     // ==================== 请求 DTO ====================
 
     public static class SaveFrameRequest {
@@ -158,5 +199,11 @@ public class ArchiveController {
         public String content;
         public List<String> frameIds;
         public String platform;
+    }
+
+    public static class SaveAllRequest {
+        public String videoId;
+        public String description;
+        public List<Map<String, Object>> frames;
     }
 }

@@ -30,10 +30,6 @@ export default function FrameTimeline() {
   const handleDelete = (e, frameId, index) => {
     e.stopPropagation()
     
-    if (!confirm(`确定要删除第 ${index + 1} 帧吗？`)) {
-      return
-    }
-
     setDeletingId(frameId)
     removeFrame(frameId)
     setDeletingId(null)
@@ -90,22 +86,18 @@ export default function FrameTimeline() {
   }
 
   return (
-    <div className='flex gap-2 overflow-x-auto pb-2 scrollbar-thin'>
+    <div className='flex gap-2 overflow-x-auto pb-2 scrollbar-thin min-w-0' style={{ maxWidth: '100%' }}>
       {frames.map((frame, index) => (
         <div
           key={frame.frameId}
-          draggable
-          onDragStart={(e) => handleDragStart(e, index)}
-          onDragEnd={handleDragEnd}
           onDragOver={(e) => handleDragOver(e, index)}
           onDragLeave={handleDragLeave}
           onDrop={(e) => handleDrop(e, index)}
-          className={`group relative flex-shrink-0 cursor-move rounded-lg overflow-hidden border-2 transition-all
+          className={`group relative flex-shrink-0 rounded-lg overflow-hidden border-2 transition-all
             ${selectedFrameId === frame.frameId ? 'border-blue-500 scale-105' : 'border-transparent hover:border-slate-500'}
             ${dragOverIndex === index ? 'ring-2 ring-green-500 ring-offset-2 ring-offset-slate-900' : ''}
             ${dragItemRef.current === index ? 'opacity-50' : ''}`}
           onClick={() => setSelectedFrameId(frame.frameId)}
-          title={`第 ${index + 1} 帧 - 拖拽可调整顺序`}
         >
           {/* 左移按钮 */}
           {index > 0 && (
@@ -136,8 +128,14 @@ export default function FrameTimeline() {
             draggable={false}
           />
           
-          {/* 序号 */}
-          <div className='absolute top-0.5 left-0.5 bg-black/60 text-white text-[10px] px-1 rounded'>
+          {/* 序号 - 拖拽句柄 */}
+          <div 
+            draggable
+            onDragStart={(e) => handleDragStart(e, index)}
+            onDragEnd={handleDragEnd}
+            className='absolute top-0.5 left-0.5 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded cursor-move hover:bg-blue-600/80 z-20'
+            title={`第 ${index + 1} 帧 - 拖拽可调整顺序`}
+          >
             {index + 1}
           </div>
 

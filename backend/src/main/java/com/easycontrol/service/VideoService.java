@@ -1,7 +1,10 @@
 package com.easycontrol.service;
 
 import com.easycontrol.model.FrameInfo;
+import com.easycontrol.model.VideoArchive;
 import com.easycontrol.model.VideoUploadResponse;
+import com.easycontrol.repository.VideoArchiveRepository;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -14,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class VideoService {
 
   @Value("${app.upload-dir}")
@@ -21,6 +25,8 @@ public class VideoService {
 
   @Value("${app.ffmpeg-path}")
   private String ffmpegPath;
+  
+  private final VideoArchiveRepository videoArchiveRepository;
 
   public VideoUploadResponse uploadVideo(MultipartFile file) throws IOException {
     Path uploadPath = Paths.get(uploadDir);
@@ -120,7 +126,7 @@ public class VideoService {
     }
   }
 
-  private long getVideoDuration(String videoPath) {
+  public long getVideoDuration(String videoPath) {
     try {
       List<String> cmd = List.of(
           "ffprobe",
@@ -145,14 +151,42 @@ public class VideoService {
   }
 
   private Path findVideoPath(String videoId) throws IOException {
+    // 1. 先在 uploads 目录查找（原始上传的视频）
     Path uploadPath = Paths.get(uploadDir);
-    if (!Files.exists(uploadPath)) return null;
-
-    return Files.list(uploadPath)
-        .filter(p -> p.getFileName().toString().startsWith(videoId))
-        .filter(p -> !p.toString().contains("_frames"))
-        .findFirst()
-        .orElse(null);
+    if (Files.exists(uploadPath)) {
+      Path found = Files.list(uploadPath)
+          .filter(p -> p.getFileName().toString().startsWith(videoId))
+          .filter(p -> !p.toString().contains("_frames"))
+          .findFirst()
+          .orElse(null);
+      if (found != null) return found;
+    }
+    
+    // 2. 如果找不到，尝试查找归档视频（videoId 可能是 archiveId）
+    Optional<VideoArchive> archiveOpt = videoArchiveRepository.findById(videoId);
+    if (archiveOpt.isPresent()) {
+      VideoArchive archive = archiveOpt.get();
+      if (archive.getFilePath() != null) {
+        Path archiveVideoPath = Paths.get(archive.getFilePath());
+        if (Files.exists(archiveVideoPath)) {
+          return archiveVideoPath;
+        }
+      }
+    }
+    
+    // 3. 尝试通过原始 videoId 查找归档视频
+    Optional<VideoArchive> archiveByOrigId = videoArchiveRepository.findByVideoId(videoId);
+    if (archiveByOrigId.isPresent()) {
+      VideoArchive archive = archiveByOrigId.get();
+      if (archive.getFilePath() != null) {
+        Path archiveVideoPath = Paths.get(archive.getFilePath());
+        if (Files.exists(archiveVideoPath)) {
+          return archiveVideoPath;
+        }
+      }
+    }
+    
+    return null;
   }
 
   public Path getVideoPath(String videoId) throws IOException {

@@ -42,8 +42,11 @@ public class FrameArchive {
     @Column(name = "annotation_json", length = 10000)
     private String annotationJson;
     
-    @Column(name = "base64_preview")
+    @Column(name = "base64_preview", length = 100000)
     private String base64Preview;
+    
+    @Transient
+    private String base64Image;
     
     @CreationTimestamp
     @Column(name = "created_at")
